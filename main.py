@@ -8,134 +8,123 @@ from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 
-# 获取账号密码
 EMAIL = os.environ.get("DOG_EMAIL")
 PASSWORD = os.environ.get("DOG_PASSWORD")
 
 def run_task():
-    # --- 1. 升级版浏览器伪装配置 ---
+    print(">>> 初始化浏览器 (配合 WARP 网络)...")
+    
     chrome_options = Options()
-    chrome_options.add_argument("--headless") 
+    # 必须的无头配置
+    chrome_options.add_argument("--headless=new") # 使用新版无头模式，特征更少
     chrome_options.add_argument("--no-sandbox")
     chrome_options.add_argument("--disable-dev-shm-usage")
     
-    # 关键：禁用自动化控制特征，防止被检测为机器人
-    chrome_options.add_argument("--disable-blink-features=AutomationControlled")
-    chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
-    chrome_options.add_experimental_option('useAutomationExtension', False)
-    
-    # 模拟最新的 Windows Chrome
-    chrome_options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36")
+    # 伪装配置
     chrome_options.add_argument("--window-size=1920,1080")
+    chrome_options.add_argument("--disable-blink-features=AutomationControlled")
+    chrome_options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
     
+    # 忽略证书错误（代理模式下常见）
+    chrome_options.add_argument("--ignore-certificate-errors")
+
     driver = webdriver.Chrome(options=chrome_options)
-    # 修改 WebDriver 属性，防止被 JS 检测
+    
+    # 移除 webdriver 特征
     driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
 
-    start_time = time.time()
-    max_duration = 21000 
-
     try:
-        print(">>> [1/4] 正在打开登录页 (https://www.freedogdog.com/auth/login)...")
-        driver.get("https://www.freedogdog.com/auth/login")
-        
-        # --- 2. 智能等待与诊断 ---
-        print(">>> 等待页面加载...")
+        # === 1. 验证网络 ===
+        print(">>> [0/4] 检查当前网络连通性...")
         try:
-            # 最多等 20 秒，直到邮箱输入框出现
-            # 我们尝试用 name="email" 来找，这比 type="email" 更通用
-            email_input = WebDriverWait(driver, 20).until(
-                EC.presence_of_element_located((By.NAME, "email"))
-            )
-            print("✅ 成功找到邮箱输入框！")
-            
-        except Exception as e:
-            # 如果等了20秒还没找到，说明出大事了
-            print("\n❌ 严重错误：找不到登录框！")
-            print(f"当前页面标题是: 【{driver.title}】")
-            print("可能原因：")
-            print("1. 遇到了 Cloudflare 五秒盾 (Just a moment...)")
-            print("2. 网站改版了")
-            
-            # 打印网页源码的前500个字，看看是啥
-            print(f"网页源码片段: {driver.page_source[:500]}")
-            
-            # 直接结束程序
-            driver.quit()
+            driver.get("https://www.google.com")
+            print(f"Google 访问标题: {driver.title}")
+        except:
+            print("无法访问 Google，WARP 可能连接不稳定，但继续尝试目标网站...")
+
+        # === 2. 打开登录页 ===
+        target_login = "https://www.freedogdog.com/auth/login"
+        print(f">>> [1/4] 正在打开: {target_login}")
+        
+        driver.get(target_login)
+        time.sleep(5)
+        
+        # 截图页面源码的一小部分，确认是否还是 Not Found
+        print(f"当前页面标题: 【{driver.title}】")
+        if "Not Found" in driver.page_source or driver.title == "":
+            print("❌ 依然被拦截！WARP IP 也被墙了，或者网站有极高级别的风控。")
+            print(driver.page_source[:200])
             return
 
-        # --- 3. 执行登录 ---
+        # === 3. 输入账号密码 ===
         print(">>> [2/4] 输入账号密码...")
-        email_input.clear()
-        email_input.send_keys(EMAIL)
+        # 显式等待输入框
+        WebDriverWait(driver, 20).until(
+            EC.presence_of_element_located((By.CSS_SELECTOR, "input[type='email']"))
+        ).send_keys(EMAIL)
         
-        # 找密码框
-        pass_input = driver.find_element(By.CSS_SELECTOR, "input[type='password']")
-        pass_input.clear()
-        pass_input.send_keys(PASSWORD)
+        driver.find_element(By.CSS_SELECTOR, "input[type='password']").send_keys(PASSWORD)
+        time.sleep(1)
         
-        # 登录
+        # 提交
         print(">>> 提交登录...")
-        pass_input.send_keys(Keys.ENTER)
+        driver.find_element(By.CSS_SELECTOR, "input[type='password']").send_keys(Keys.ENTER)
         
-        time.sleep(10) # 等待跳转
+        # 等待跳转
+        time.sleep(10)
         print(f"登录后标题: {driver.title}")
 
-        # --- 4. 循环购买 ---
+        # === 4. 循环购买 ===
         buy_url = "https://www.freedogdog.com/user/plan2?id=1"
-        print(">>> [3/4] 开始循环任务...")
+        start_time = time.time()
         
+        print(">>> [3/4] 进入抢购循环...")
         while True:
-            if time.time() - start_time > max_duration:
+            if time.time() - start_time > 21000: # 接近6小时
                 break
-
-            current_time = datetime.datetime.now().strftime("%H:%M:%S")
+                
             try:
                 driver.get(buy_url)
-                # 等待 5 秒让 JS 加载
                 time.sleep(5)
                 
-                # 尝试点击任何看起来像下单的按钮
-                # 这里使用了 CSS 选择器，查找包含 specific class 的按钮
-                # 同时也保留 XPath 文本查找
+                # 暴力查找所有可能的按钮
+                # 针对 V2Board 的结构，寻找 checkout / order 类的按钮
+                print(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] 扫描按钮...")
                 
-                found = False
+                # 方案A: 文本匹配
+                xpath = "//*[contains(text(),'下单') or contains(text(),'结账') or contains(text(),'Submit') or contains(text(),'Checkout')]"
+                btns = driver.find_elements(By.XPATH, xpath)
                 
-                # 策略 A: 找文字
-                try:
-                    targets = driver.find_elements(By.XPATH, "//*[contains(text(),'下单') or contains(text(),'结账') or contains(text(),'¥') or contains(text(),'Submit')]")
-                    for t in targets:
-                        # 排除掉不可见的元素
-                        if t.is_displayed():
-                            print(f"[{current_time}] 尝试点击文本按钮: {t.text}")
-                            driver.execute_script("arguments[0].click();", t)
-                            found = True
+                if btns:
+                    for btn in btns:
+                        if btn.is_displayed():
+                            print(f"👉 点击文本按钮: {btn.text}")
+                            driver.execute_script("arguments[0].click();", btn)
+                            print("✅ 点击指令已发送")
                             break
-                except:
-                    pass
-                
-                # 策略 B: 找 V2Board 常见的 Checkout 按钮 class
-                if not found:
+                else:
+                    # 方案B: CSS 类匹配 (常见于 V2Board)
                     try:
                         btn = driver.find_element(By.CSS_SELECTOR, ".btn-primary")
-                        print(f"[{current_time}] 尝试点击主按钮 (.btn-primary)")
+                        print("👉 点击 .btn-primary 按钮")
                         driver.execute_script("arguments[0].click();", btn)
-                        found = True
+                        print("✅ 点击指令已发送")
                     except:
-                        pass
-
-                if found:
-                    print(f"[{current_time}] ✅ 点击动作已发送")
-                else:
-                    print(f"[{current_time}] ⚠️ 未找到按钮。当前标题: {driver.title}")
+                        print(f"⚠️ 没找到按钮。当前标题: {driver.title}")
 
             except Exception as e:
-                print(f"[{current_time}] 出错: {e}")
-
+                print(f"出错: {str(e)[:100]}")
+                
             time.sleep(60)
 
     except Exception as e:
         print(f"致命错误: {e}")
+        # 打印源码方便排查
+        try:
+            print("最后的页面源码片段:")
+            print(driver.page_source[:500])
+        except:
+            pass
     finally:
         driver.quit()
 
