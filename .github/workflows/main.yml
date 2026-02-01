@@ -1,9 +1,9 @@
-name: Dog Buy Bot
+name: WARP Buy Bot
 
 on:
-  workflow_dispatch: # 允许手动点按钮开始
+  workflow_dispatch:
   schedule:
-    - cron: '0 */6 * * *' # 每6小时自动重启一次
+    - cron: '0 */6 * * *'
 
 jobs:
   run-bot:
@@ -14,17 +14,29 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v3
 
+      # === 核心黑科技：启动 Cloudflare WARP ===
+      # 这会将 GitHub 的 IP 变为 Cloudflare 的 IP，绕过封锁
+      - name: Set up WARP
+        uses: fscarmen/warp-on-actions@v1.1
+        with:
+          stack: dual # 启用双栈网络
+
+      - name: Check IP (验证是否换IP成功)
+        run: |
+          echo "正在检查当前 IP..."
+          curl -s https://ip.gs
+
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.9'
 
-      - name: Install Selenium
-        run: pip install selenium
+      - name: Install Dependencies
+        run: |
+          pip install selenium
 
       - name: Run Script
         env:
-          # 把第二步设置的密码注入给脚本
           DOG_EMAIL: ${{ secrets.DOG_EMAIL }}
           DOG_PASSWORD: ${{ secrets.DOG_PASSWORD }}
         run: python main.py
